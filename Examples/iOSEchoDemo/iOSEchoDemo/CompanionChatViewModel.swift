@@ -176,7 +176,12 @@ final class CompanionChatViewModel {
         config.maxResponseDuration = 5.0   // Cap TTS output to prevent repetition loops
         config.eagerSTT = true  // Start transcribing during speech, don't wait for silence
         config.warmupSTT = false
-        config.preSpeechBufferDuration = 2.0  // Capture beginning of sentences before VAD fires
+        // Short pre-roll — long pre-roll (2.0 s) of leading silence before
+        // brief utterances flips Parakeet TDT v3's auto language detection
+        // into Russian/etc. and produces phonetic transliteration. 0.3 s
+        // is enough to capture the consonant onset without dominating the
+        // mel input.
+        config.preSpeechBufferDuration = 0.3
         config.postPlaybackGuard = 2.0  // Suppress VAD for 2s after TTS to prevent echo feedback (no AEC yet)
 
         pipeline = VoicePipeline(
