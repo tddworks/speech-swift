@@ -353,7 +353,7 @@ let package = Package(
         ),
         .testTarget(
             name: "HibikiTranslateTests",
-            dependencies: ["HibikiTranslate", "AudioCommon", "ParakeetASR"],
+            dependencies: ["HibikiTranslate", "AudioCommon", "ParakeetASR", "Qwen3TTS"],
             resources: [
                 .copy("Resources/fleurs_fr.wav")
             ]

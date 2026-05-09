@@ -5,6 +5,7 @@ import MLXRandom
 import AudioCommon
 import ParakeetASR
 import PersonaPlex
+import Qwen3TTS
 @testable import HibikiTranslate
 
 /// E2E tests that download the Hibiki Zero-3B model from HuggingFace and
@@ -222,6 +223,129 @@ final class E2EHibikiTranslateTests: XCTestCase {
             } else if hits.isEmpty {
                 print("[hibiki-e2e] WARNING: 0 expected keywords matched (set HIBIKI_STRICT=1 to fail)")
             }
+        }
+    }
+
+    /// **Closed-loop diagnostic round trip**: known FR text → Qwen3TTS → FR
+    /// audio → Hibiki Zero-3B → EN audio → Parakeet ASR → EN text.
+    ///
+    /// This isolates "is the model output meaningful?" from "is the input
+    /// sample in-distribution?" — TTS-generated speech is consistent and
+    /// in-distribution for Hibiki's training. Run with `HIBIKI_E2E=1`.
+    ///
+    /// Logs all four stages so we can inspect where quality degrades.
+    func testClosedLoopTTSToHibikiToASR() async throws {
+        let hasEnv = ProcessInfo.processInfo.environment["HIBIKI_E2E"] != nil
+        try XCTSkipUnless(hasEnv, "Set HIBIKI_E2E=1 to run closed-loop TTS↔Hibiki↔ASR round trip")
+
+        // Test cases: known FR text + expected EN keywords (any reasonable subset).
+        // Three short, simple sentences from common everyday speech — should be
+        // well within Hibiki Zero-3B's training distribution.
+        struct Case {
+            let frText: String
+            let expectedEN: String
+            let keywords: [String]
+        }
+        let cases: [Case] = [
+            Case(frText: "Bonjour, comment allez-vous aujourd'hui?",
+                 expectedEN: "Hello, how are you today?",
+                 keywords: ["hello", "hi", "how", "are", "you", "today"]),
+            Case(frText: "J'aime beaucoup les pommes rouges.",
+                 expectedEN: "I really like red apples.",
+                 keywords: ["like", "love", "red", "apple", "apples"]),
+            Case(frText: "Le chat dort sur le canapé.",
+                 expectedEN: "The cat sleeps on the couch.",
+                 keywords: ["cat", "sleep", "sleeps", "couch", "sofa"]),
+        ]
+
+        // 1. Load TTS, Hibiki, ASR — once.
+        print("[hibiki-loop] loading Qwen3TTS...")
+        let tts = try await Qwen3TTSModel.fromPretrained()
+        print("[hibiki-loop] loading Hibiki Zero-3B...")
+        let modelId = ProcessInfo.processInfo.environment["HIBIKI_MODEL_ID"]
+            ?? HibikiTranslateModel.defaultModelId
+        let hibiki = try await HibikiTranslateModel.fromPretrained(modelId: modelId)
+        print("[hibiki-loop] loading Parakeet ASR...")
+        let asr = try await ParakeetASRModel.fromPretrained()
+
+        var anyKeywordHit = false
+        var allResults: [(Case, String)] = []
+
+        for (idx, c) in cases.enumerated() {
+            print("\n[hibiki-loop] === Case \(idx + 1)/\(cases.count) ===")
+            print("[hibiki-loop] FR text:   \(c.frText)")
+            print("[hibiki-loop] Reference EN: \(c.expectedEN)")
+
+            // 2. Synthesize French audio.
+            let frAudio = tts.synthesize(text: c.frText, language: "french", languageExplicit: true)
+            let frDur = Double(frAudio.count) / 24000.0
+            print("[hibiki-loop] Qwen3TTS produced FR audio: " +
+                  "\(frAudio.count) samples, \(String(format: "%.2f", frDur))s")
+            XCTAssertGreaterThan(frAudio.count, Int(0.5 * 24000),
+                                 "Qwen3TTS should produce > 0.5s of audio")
+
+            // 3. Translate FR → EN audio with Hibiki.
+            let (enAudio, textTokens) = hibiki.translate(
+                sourceAudio: frAudio, sourceLanguage: .fr, verbose: false
+            )
+            let enDur = Double(enAudio.count) / 24000.0
+            let rms = sqrt(enAudio.map { $0 * $0 }.reduce(0, +) / Float(enAudio.count))
+            print("[hibiki-loop] Hibiki produced EN audio: " +
+                  "\(enAudio.count) samples, \(String(format: "%.2f", enDur))s, " +
+                  "RMS=\(String(format: "%.4f", rms)), " +
+                  "\(textTokens.count) text tokens")
+
+            // Save for inspection.
+            let outDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("hibiki-loop", isDirectory: true)
+            try? FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+            let frURL = outDir.appendingPathComponent("case\(idx + 1)_fr.wav")
+            let enURL = outDir.appendingPathComponent("case\(idx + 1)_en.wav")
+            try WAVWriter.write(samples: frAudio, sampleRate: 24000, to: frURL)
+            try WAVWriter.write(samples: enAudio, sampleRate: 24000, to: enURL)
+            print("[hibiki-loop] saved: \(frURL.lastPathComponent), \(enURL.lastPathComponent)")
+
+            // 4. ASR the EN audio.
+            let transcript = asr.transcribe(audio: enAudio, sampleRate: 24000, language: nil)
+                .lowercased()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            print("[hibiki-loop] Parakeet EN transcript: '\(transcript)'")
+
+            // 5. Keyword hit count.
+            let hits = c.keywords.filter { transcript.contains($0) }
+            print("[hibiki-loop] keyword hits: \(hits.isEmpty ? "[none]" : hits.joined(separator: ", "))")
+            if !hits.isEmpty { anyKeywordHit = true }
+
+            allResults.append((c, transcript))
+
+            // Per-case structural assertion: synchronous 1:1 from Hibiki.
+            XCTAssertGreaterThan(enDur, frDur * 0.7, "1:1 sync: EN ≥ 0.7×FR")
+            XCTAssertLessThan(enDur, frDur * 1.3, "1:1 sync: EN ≤ 1.3×FR")
+        }
+
+        // Summary table.
+        print("\n[hibiki-loop] ================ SUMMARY ================")
+        for (i, (c, transcript)) in allResults.enumerated() {
+            print("[hibiki-loop] \(i + 1). FR: \(c.frText)")
+            print("[hibiki-loop]    Expected EN: \(c.expectedEN)")
+            print("[hibiki-loop]    Got transcript: '\(transcript)'")
+            let h = c.keywords.filter { transcript.contains($0) }
+            print("[hibiki-loop]    Keyword hits: \(h.isEmpty ? "NONE" : h.joined(separator: ", "))")
+        }
+        print("[hibiki-loop] ============================================")
+
+        // Soft success criterion: at least one case across all 3 should produce
+        // a recognizable English keyword. This is a low bar but a much stricter
+        // signal than the FLEURS-only test.
+        if !anyKeywordHit {
+            print("[hibiki-loop] WARNING: 0 keyword hits across all 3 test cases. " +
+                  "This suggests a real translation-quality issue in our port.")
+        }
+        // Don't hard-fail unless explicitly requested; this test is diagnostic
+        // and we want the full output table even when quality is poor.
+        if ProcessInfo.processInfo.environment["HIBIKI_STRICT"] != nil {
+            XCTAssertTrue(anyKeywordHit,
+                "STRICT: at least one of 3 cases should produce ≥1 expected keyword")
         }
     }
 }

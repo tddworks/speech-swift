@@ -67,16 +67,20 @@ public extension HibikiTranslateModel {
             tokenCache[0][t + delays[0]] = Int32(cfg.temporal.textPaddingId)
         }
 
-        // Pre-populate source codebook streams (1..16) with Mimi-encoded codes.
-        // Each stream s gets shifted by delays[s].
+        // Pre-populate **source** (FR Mimi-encoded) codebook streams.
+        // Following Moshi/PersonaPlex convention, generated tokens occupy
+        // streams 1..nQ ("agent half") and input audio occupies streams
+        // 1+nQ..1+2nQ-1 ("user half"). For Hibiki Zero-3B that means source
+        // (FR) lives in streams 17..32 — NOT 1..16. Each stream is shifted
+        // by `delays[stream]`.
         let sourceCodesHost = sourceCodes.reshaped([nQ, tSrc]).asArray(Int32.self)
         for cb in 0..<nQ {
-            let streamIdx = 1 + cb
-            let delay = delays[streamIdx]
+            let sourceStreamIdx = 1 + nQ + cb        // 17..32
+            let delay = delays[sourceStreamIdx]
             for t in 0..<tSrc {
                 let writePos = t + delay
                 if writePos < totalLen {
-                    tokenCache[streamIdx][writePos] = sourceCodesHost[cb * tSrc + t]
+                    tokenCache[sourceStreamIdx][writePos] = sourceCodesHost[cb * tSrc + t]
                 }
             }
         }
@@ -143,17 +147,21 @@ public extension HibikiTranslateModel {
                 )
             }
 
-            // Write target codebooks into streams 17..32 (with delay shifts).
+            // Write **target** (EN, depformer-generated) codebooks into the
+            // "agent half" of the stream layout: streams 1..nQ (1..16 for
+            // Zero-3B). Following Moshi/PersonaPlex convention, target tokens
+            // are written at position `step` directly (no per-stream delay
+            // shift) — the upstream Python code writes generated tokens at
+            // target_position = offset % CT for ALL streams. The delay only
+            // applies to externally provided input (the source codes above).
             let codes = targetCodes[0]   // [16]
             for cb in 0..<nQ {
                 let tok = codes[cb].item(Int32.self)
                 targetTokens[cb].append(tok)
                 perCodebookHistory[cb].append(tok)
-                let streamIdx = 1 + nQ + cb
-                let delay = delays[streamIdx]
-                let writePos = step + delay
-                if writePos < totalLen {
-                    tokenCache[streamIdx][writePos] = tok
+                let targetStreamIdx = 1 + cb               // 1..16
+                if step < totalLen {
+                    tokenCache[targetStreamIdx][step] = tok
                 }
             }
         }
