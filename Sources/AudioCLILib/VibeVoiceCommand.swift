@@ -25,11 +25,11 @@ public struct VibeVoiceCommand: ParsableCommand {
     @Option(name: .shortAndLong, help: "Output WAV file path")
     public var output: String = "vibevoice.wav"
 
-    @Option(name: .long, help: "HuggingFace model ID")
-    public var model: String = "microsoft/VibeVoice-Realtime-0.5B"
+    @Option(name: .long, help: "HuggingFace model ID (defaults: VibeVoice-Realtime-0.5B normally, VibeVoice-1.5B with --long-form)")
+    public var model: String?
 
-    @Option(name: .long, help: "Qwen2.5 tokenizer model ID")
-    public var tokenizer: String = "Qwen/Qwen2.5-0.5B"
+    @Option(name: .long, help: "Qwen2.5 tokenizer model ID (defaults: Qwen2.5-0.5B normally, Qwen2.5-1.5B with --long-form)")
+    public var tokenizer: String?
 
     @Option(name: .long, help: "DPM-Solver inference steps (higher = better quality, slower)")
     public var steps: Int = 20
@@ -74,11 +74,10 @@ public struct VibeVoiceCommand: ParsableCommand {
             var config: VibeVoiceTTSModel.Configuration = longForm
                 ? .longForm1_5B
                 : VibeVoiceTTSModel.Configuration()
-            // Allow CLI overrides.
-            if !longForm {
-                config.modelId = model
-                config.tokenizerModelId = tokenizer
-            }
+            // Allow CLI overrides — only when user explicitly passed them, so
+            // each preset's correct defaults survive otherwise.
+            if let m = model { config.modelId = m }
+            if let t = tokenizer { config.tokenizerModelId = t }
             config.numInferenceSteps = steps
             config.cfgScale = cfg
             config.maxSpeechTokens = maxTokens
@@ -96,14 +95,17 @@ public struct VibeVoiceCommand: ParsableCommand {
                 print("Loading reference audio: \(refPath)")
                 let refURL = URL(fileURLWithPath: refPath)
                 let refSamples = try AudioFileLoader.load(url: refURL, targetSampleRate: 24000)
-                // Re-load via the proper unified-LM 1.5B model class.
-                print("Loading 1.5B unified-LM model (\(model))...")
+                // Re-load via the proper unified-LM 1.5B model class. Defaults
+                // (aufklarer/VibeVoice-1.5B-MLX-INT4 + Qwen2.5-1.5B tokenizer)
+                // come from VibeVoice15BTTSModel.Configuration — only override
+                // when the caller passed --model / --tokenizer explicitly.
                 var cfg15 = VibeVoice15BTTSModel.Configuration()
-                cfg15.modelId = model
-                cfg15.tokenizerModelId = tokenizer
+                if let m = model { cfg15.modelId = m }
+                if let t = tokenizer { cfg15.tokenizerModelId = t }
                 cfg15.numInferenceSteps = steps
                 cfg15.cfgScale = cfg
                 cfg15.maxSpeechTokens = maxTokens
+                print("Loading 1.5B unified-LM model (\(cfg15.modelId))...")
                 let tts15 = try await VibeVoice15BTTSModel.fromPretrained(
                     configuration: cfg15,
                     progressHandler: reportProgress

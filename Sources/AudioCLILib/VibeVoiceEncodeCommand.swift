@@ -28,11 +28,11 @@ public struct VibeVoiceEncodeCommand: ParsableCommand {
     @Option(name: .shortAndLong, help: "Output voice cache (.safetensors)")
     public var output: String = "voice.safetensors"
 
-    @Option(name: .long, help: "HuggingFace model ID")
-    public var model: String = "microsoft/VibeVoice-Realtime-0.5B"
+    @Option(name: .long, help: "HuggingFace model ID (defaults: VibeVoice-Realtime-0.5B normally, VibeVoice-1.5B with --long-form)")
+    public var model: String?
 
-    @Option(name: .long, help: "Qwen2.5 tokenizer model ID")
-    public var tokenizer: String = "Qwen/Qwen2.5-0.5B"
+    @Option(name: .long, help: "Qwen2.5 tokenizer model ID (defaults: Qwen2.5-0.5B normally, Qwen2.5-1.5B with --long-form)")
+    public var tokenizer: String?
 
     @Flag(name: .long, help: "Use the long-form 1.5B variant preset")
     public var longForm: Bool = false
@@ -50,10 +50,10 @@ public struct VibeVoiceEncodeCommand: ParsableCommand {
             var config: VibeVoiceTTSModel.Configuration = longForm
                 ? .longForm1_5B
                 : VibeVoiceTTSModel.Configuration()
-            if !longForm {
-                config.modelId = model
-                config.tokenizerModelId = tokenizer
-            }
+            // Only override the preset's defaults when the caller passed
+            // --model / --tokenizer explicitly.
+            if let m = model { config.modelId = m }
+            if let t = tokenizer { config.tokenizerModelId = t }
 
             print("Loading VibeVoice model (\(config.modelId))...")
             let tts = try await VibeVoiceTTSModel.fromPretrained(
