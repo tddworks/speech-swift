@@ -191,6 +191,25 @@ public final class VibeVoiceTTSModel {
         sampleRate: Int = 24000,
         transcript: String
     ) throws -> [String: MLXArray] {
+        // Realtime-0.5B doesn't ship the acoustic encoder — its checkpoint is
+        // inference-only. Without real encoder weights our acoustic_tokenizer.encode
+        // call returns random-init noise, producing a voice cache that the EOS
+        // classifier reads as an arbitrary speaker and the model babbles for
+        // hundreds of tokens before settling. Bail with a useful message so
+        // callers don't ship an unintelligible cache.
+        guard inference.model.hasAcousticEncoder else {
+            throw VibeVoiceError.modelNotInitialized(component:
+                "acoustic encoder not present in this checkpoint — Microsoft's "
+                + "VibeVoice-Realtime-0.5B is distributed inference-only and does "
+                + "not include encoder weights. Two ways forward:\n"
+                + "  • To mint a cache from raw audio, pass --long-form on the "
+                + "encode-voice CLI subcommand to encode with VibeVoice-1.5B.\n"
+                + "  • To synthesize with the smaller Realtime-0.5B, start from "
+                + "one of Microsoft's pre-built voice caches at "
+                + "https://github.com/microsoft/VibeVoice/tree/main/demo/voices/streaming_model "
+                + "and convert via scripts/convert_vibevoice_voice.py."
+            )
+        }
         let audio: [Float]
         if sampleRate != AudioConstants.sampleRate {
             audio = AudioFileLoader.resample(
