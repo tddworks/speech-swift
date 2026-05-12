@@ -73,12 +73,46 @@ extension CosyVoiceTTSModel {
         // 1. Speech tokenizer: 128-mel @ 16 kHz → FSQ codes @ 25 Hz.
         let whisperExtractor = WhisperMelExtractor()
         let whisperMel = whisperExtractor.extract(audio16k)               // [1, 128, T_mel100]
-        let promptToken = speechTokenizer.encode(mel: whisperMel)         // [1, T_token25]
+        var promptToken = speechTokenizer.encode(mel: whisperMel)         // [1, T_token25]
         eval(promptToken)
+
+        // Debug-only override: COSY_OVERRIDE_FSQ_CODES=<path.bin> replaces the
+        // computed codes with a known-good sequence (e.g. dumped from upstream
+        // s3tokenizer). Used to isolate whether the cloning regression is from
+        // the speech-tokenizer math or from elsewhere in the pipeline.
+        if let overridePath = ProcessInfo.processInfo.environment["COSY_OVERRIDE_FSQ_CODES"],
+           let data = try? Data(contentsOf: URL(fileURLWithPath: overridePath)) {
+            let count = data.count / MemoryLayout<Int32>.size
+            let codes = data.withUnsafeBytes { ptr -> [Int32] in
+                let buf = ptr.bindMemory(to: Int32.self)
+                return Array(buf.prefix(count))
+            }
+            promptToken = MLXArray(codes).expandedDimensions(axis: 0)
+            eval(promptToken)
+            print("  [override] prompt_token from \(overridePath): \(count) codes")
+        }
 
         // 2. Flow mel: 80-mel @ 24 kHz, 50 Hz frame rate.
         let flowExtractor = FlowMelExtractor()
         var promptFeat = flowExtractor.extract(audio24k)                  // [1, 80, T_mel50]
+
+        // Debug override: COSY_OVERRIDE_FLOW_MEL=<path.bin> replaces the computed
+        // prompt_feat. The file must be raw float32 with shape [n_mels, T] (use
+        // the matching .meta.json describing shape). Used to isolate whether the
+        // remaining cloning gap is from the flow mel extractor or further down.
+        if let overridePath = ProcessInfo.processInfo.environment["COSY_OVERRIDE_FLOW_MEL"],
+           let data = try? Data(contentsOf: URL(fileURLWithPath: overridePath)) {
+            let count = data.count / MemoryLayout<Float>.size
+            let floats = data.withUnsafeBytes { ptr -> [Float] in
+                let buf = ptr.bindMemory(to: Float.self)
+                return Array(buf.prefix(count))
+            }
+            // Shape is [80, T] from upstream. Reshape to [1, 80, T].
+            let T = count / 80
+            promptFeat = MLXArray(floats, [1, 80, T])
+            eval(promptFeat)
+            print("  [override] prompt_feat from \(overridePath): [1, 80, \(T)]")
+        }
 
         // Debug dump for the Python-vs-Swift diff. Activated by
         // COSY_DEBUG_DUMP_DIR=<dir> — writes raw binary float32 / int32 files
@@ -90,23 +124,16 @@ extension CosyVoiceTTSModel {
             CosyVoiceDebugDump.tryWrite(promptFeat, name: "swift_flow_mel", in: dumpDir)
         }
 
-        // Align lengths: the flow upsamples promptToken by tokenMelRatio (= 2)
-        // and assumes prompt_feat has exactly that many frames. Truncate or pad
-        // the mel to match. In practice the two extractors are tightly aligned
-        // (25 Hz × 2 = 50 Hz off the same source), but resampling rounding can
-        // leave us ±1 frame off; truncating to the expected length is
-        // upstream-equivalent.
-        let tokLen = promptToken.dim(1)
-        let expectedMelLen = tokLen * flow.config.tokenMelRatio
-        let melLen = promptFeat.dim(2)
-        if melLen > expectedMelLen {
-            promptFeat = promptFeat[0..., 0..., 0..<expectedMelLen]
-        } else if melLen < expectedMelLen {
-            let pad = MLXArray.zeros(
-                [1, promptFeat.dim(1), expectedMelLen - melLen]
-            ).asType(promptFeat.dtype)
-            promptFeat = concatenated([promptFeat, pad], axis: 2)
-        }
+        // Don't force-align prompt_feat length to prompt_token * tokenMelRatio.
+        // Upstream's flow.inference takes whatever matcha.mel produces (1966
+        // frames for a ~39 s clip) and lets it differ from prompt_token_len * 2
+        // (1968 frames) by a small amount — the conds tensor is sized to the
+        // FULL upsampled-mu length and has prompt_feat in `[:mel_len1]` and
+        // zeros for the rest (including the 2-frame gap). The slice at the end
+        // of synthesise then uses `mel_len1` (= prompt_feat.shape[2]), keeping
+        // those gap frames in the generation region as transition frames.
+        // Padding to 2*T_token here caused us to lose 2 mel frames off the
+        // front of the generated content and confused the cond conditioning.
         eval(promptFeat)
 
         // 3. (Optional) CAM++ 192-d speaker embedding.
