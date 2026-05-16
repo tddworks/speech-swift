@@ -10,10 +10,10 @@ Spracherkennung, -synthese und -verständnis auf dem Gerät für Mac und iOS. L�
 
 <p align="center">
   <a href="https://youtu.be/x9zgcaW0gUk">
-    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="Lokale Sprach-KI auf einem MacBook — eine vierminütige Tour durch die Open-Source-Bibliothek">
+    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="Lokale Sprach-KI auf einem MacBook — die vierminütige Tour durch die Open-Source-Bibliothek auf YouTube ansehen">
   </a>
 </p>
-<p align="center"><em>Lokale Sprach-KI auf einem MacBook — eine vierminütige Tour durch die Open-Source-Bibliothek</em></p>
+<p align="center"><em>Lokale Sprach-KI auf einem MacBook — die vierminütige Tour durch die Open-Source-Bibliothek auf YouTube ansehen</em></p>
 
 **Anwendungsfälle:** [Sprachagenten](https://soniqo.audio/de/voice-agents) · [Transkription](https://soniqo.audio/de/transcription) · [Sprachsynthese](https://soniqo.audio/de/speech-generation)
 

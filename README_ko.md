@@ -10,10 +10,10 @@ Mac과 iOS를 위한 온디바이스 음성 인식, 합성 및 이해. Apple Sil
 
 <p align="center">
   <a href="https://youtu.be/x9zgcaW0gUk">
-    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="MacBook에서 동작하는 로컬 음성 AI — 4분 분량의 오픈소스 라이브러리 투어">
+    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="MacBook에서 동작하는 로컬 음성 AI — YouTube에서 4분 분량의 오픈소스 라이브러리 투어 시청">
   </a>
 </p>
-<p align="center"><em>MacBook에서 동작하는 로컬 음성 AI — 4분 분량의 오픈소스 라이브러리 투어</em></p>
+<p align="center"><em>MacBook에서 동작하는 로컬 음성 AI — YouTube에서 4분 분량의 오픈소스 라이브러리 투어 시청</em></p>
 
 **사용 사례:** [음성 에이전트](https://soniqo.audio/ko/voice-agents) · [전사](https://soniqo.audio/ko/transcription) · [음성 합성](https://soniqo.audio/ko/speech-generation)
 

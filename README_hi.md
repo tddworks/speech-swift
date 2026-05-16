@@ -10,10 +10,10 @@ Mac और iOS के लिए ऑन-डिवाइस स्पीच रि
 
 <p align="center">
   <a href="https://youtu.be/x9zgcaW0gUk">
-    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="MacBook पर लोकल स्पीच AI — चार मिनट का ओपन-सोर्स लाइब्रेरी टूर">
+    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="MacBook पर लोकल स्पीच AI — YouTube पर चार मिनट का ओपन-सोर्स लाइब्रेरी टूर देखें">
   </a>
 </p>
-<p align="center"><em>MacBook पर लोकल स्पीच AI — चार मिनट का ओपन-सोर्स लाइब्रेरी टूर</em></p>
+<p align="center"><em>MacBook पर लोकल स्पीच AI — YouTube पर चार मिनट का ओपन-सोर्स लाइब्रेरी टूर देखें</em></p>
 
 **यूज़-केस:** [वॉइस एजेंट](https://soniqo.audio/hi/voice-agents) · [ट्रांसक्रिप्शन](https://soniqo.audio/hi/transcription) · [स्पीच जनरेशन](https://soniqo.audio/hi/speech-generation)
 

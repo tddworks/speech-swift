@@ -10,10 +10,10 @@ Reconocimiento, síntesis y comprensión de voz en el dispositivo para Mac e iOS
 
 <p align="center">
   <a href="https://youtu.be/x9zgcaW0gUk">
-    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="IA de voz local en un MacBook — un recorrido de cuatro minutos por la biblioteca open source">
+    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="IA de voz local en un MacBook — mira en YouTube el recorrido de cuatro minutos por la biblioteca open source">
   </a>
 </p>
-<p align="center"><em>IA de voz local en un MacBook — un recorrido de cuatro minutos por la biblioteca open source</em></p>
+<p align="center"><em>IA de voz local en un MacBook — mira en YouTube el recorrido de cuatro minutos por la biblioteca open source</em></p>
 
 **Casos de uso:** [Agentes de voz](https://soniqo.audio/es/voice-agents) · [Transcripción](https://soniqo.audio/es/transcription) · [Síntesis de voz](https://soniqo.audio/es/speech-generation)
 

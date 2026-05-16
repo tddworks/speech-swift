@@ -10,10 +10,10 @@ Mac・iOS向けのオンデバイス音声認識・合成・理解。Apple Silic
 
 <p align="center">
   <a href="https://youtu.be/x9zgcaW0gUk">
-    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="MacBook で動くローカル音声 AI ―― 4 分間のオープンソースライブラリツアー">
+    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="MacBook で動くローカル音声 AI ―― YouTube で 4 分間のオープンソースライブラリツアーを視聴">
   </a>
 </p>
-<p align="center"><em>MacBook で動くローカル音声 AI ―― 4 分間のオープンソースライブラリツアー</em></p>
+<p align="center"><em>MacBook で動くローカル音声 AI ―― YouTube で 4 分間のオープンソースライブラリツアーを視聴</em></p>
 
 **ユースケース：** [音声エージェント](https://soniqo.audio/ja/voice-agents) · [文字起こし](https://soniqo.audio/ja/transcription) · [音声合成](https://soniqo.audio/ja/speech-generation)
 

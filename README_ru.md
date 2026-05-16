@@ -10,10 +10,10 @@
 
 <p align="center">
   <a href="https://youtu.be/x9zgcaW0gUk">
-    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="Локальный речевой ИИ на MacBook — четырёхминутный обзор open source библиотеки">
+    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="Локальный речевой ИИ на MacBook — четырёхминутный обзор open source библиотеки на YouTube">
   </a>
 </p>
-<p align="center"><em>Локальный речевой ИИ на MacBook — четырёхминутный обзор open source библиотеки</em></p>
+<p align="center"><em>Локальный речевой ИИ на MacBook — четырёхминутный обзор open source библиотеки на YouTube</em></p>
 
 **Сценарии:** [Голосовые агенты](https://soniqo.audio/ru/voice-agents) · [Транскрипция](https://soniqo.audio/ru/transcription) · [Синтез речи](https://soniqo.audio/ru/speech-generation)
 

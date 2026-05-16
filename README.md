@@ -10,10 +10,10 @@ On-device speech recognition, synthesis, and understanding for Mac and iOS. Runs
 
 <p align="center">
   <a href="https://youtu.be/x9zgcaW0gUk">
-    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="Local Speech AI on a MacBook — a 4-minute open-source library tour">
+    <img src="https://img.youtube.com/vi/x9zgcaW0gUk/maxresdefault.jpg" width="640" alt="Local Speech AI on a MacBook — watch the 4-minute open-source library tour on YouTube">
   </a>
 </p>
-<p align="center"><em>Local Speech AI on a MacBook — a 4-minute open-source library tour</em></p>
+<p align="center"><em>Local Speech AI on a MacBook — watch the 4-minute open-source library tour on YouTube</em></p>
 
 **Use cases:** [Voice Agents](https://soniqo.audio/voice-agents) · [Transcription](https://soniqo.audio/transcription) · [Speech Generation](https://soniqo.audio/speech-generation)
 
