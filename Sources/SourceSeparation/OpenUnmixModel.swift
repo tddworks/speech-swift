@@ -221,6 +221,11 @@ final class LSTMCell: Module {
     private var fusedWeightT: MLXArray?  // [input+hidden, 4*hidden]
     private var fusedBias: MLXArray?     // [4*hidden]
 
+    // MLX.compile-built step function. Fuses the matmul/bias/slice/activation
+    // chain into a smaller number of Metal kernels. Built in
+    // `prepareForInference()` if compile is enabled.
+    private var compiledStep: (([MLXArray]) -> [MLXArray])?
+
     init(inputSize: Int, hiddenSize: Int) {
         self.hiddenSize = hiddenSize
         let gateSize = 4 * hiddenSize
@@ -231,9 +236,11 @@ final class LSTMCell: Module {
     }
 
     /// Concatenate the input and hidden weight matrices (and their biases) so
-    /// each `step()` runs a single matmul + add instead of two of each. Must
-    /// be called after `update(parameters:)` — calling it before pretrained
-    /// weights are loaded will fuse zeros.
+    /// each `step()` runs a single matmul + add instead of two of each, then
+    /// build a `MLX.compile`-d step function that fuses the matmul + bias +
+    /// gate-split + activations + cell-update chain. Must be called after
+    /// `update(parameters:)` — calling it before pretrained weights are loaded
+    /// will fuse zeros.
     func prepareForInference() {
         // [4*hidden, input + hidden]
         let fused = concatenated([weightIH, weightHH], axis: 1)
@@ -243,12 +250,38 @@ final class LSTMCell: Module {
         eval(fusedT, bias)
         self.fusedWeightT = fusedT
         self.fusedBias = bias
+
+        // Build a compiled function over (x, h, c) that captures the fused
+        // weight/bias as graph constants. MLX fuses the small kernels
+        // (slices, sigmoids, tanh, element-wise ops) into the gemm output.
+        // Cell input/hidden shapes are fixed per LSTMCell instance, so the
+        // shape-aware compile path is the right fit (slice ops can't run
+        // shapeless).
+        let hs = hiddenSize
+        self.compiledStep = MLX.compile { args -> [MLXArray] in
+            let x = args[0], h = args[1], c = args[2]
+            let xh = concatenated([x, h], axis: -1)
+            let gates = matmul(xh, fusedT) + bias
+            let i = sigmoid(gates[0..., 0..<hs])
+            let f = sigmoid(gates[0..., hs..<(2*hs)])
+            let g = tanh(gates[0..., (2*hs)..<(3*hs)])
+            let o = sigmoid(gates[0..., (3*hs)..<(4*hs)])
+            let newC = f * c + i * g
+            let newH = o * tanh(newC)
+            return [newH, newC]
+        }
     }
 
     func step(_ x: MLXArray, h: MLXArray, c: MLXArray) -> (MLXArray, MLXArray) {
+        // Compiled fast path — single fused Metal kernel chain.
+        if let compiledStep {
+            let out = compiledStep([x, h, c])
+            return (out[0], out[1])
+        }
+
         let gates: MLXArray
         if let fusedWeightT, let fusedBias {
-            // Fused path: one matmul, one add.
+            // Fused weights, uncompiled — used if compile is disabled globally.
             let xh = concatenated([x, h], axis: -1)
             gates = matmul(xh, fusedWeightT) + fusedBias
         } else {
