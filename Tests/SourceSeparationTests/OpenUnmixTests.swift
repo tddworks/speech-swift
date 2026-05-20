@@ -2,6 +2,8 @@ import XCTest
 @testable import SourceSeparation
 @testable import AudioCommon
 import MLX
+import MLXNN
+import MLXRandom
 import Foundation
 
 final class OpenUnmixConfigTests: XCTestCase {
@@ -81,6 +83,54 @@ final class LSTMCellTests: XCTestCase {
         eval(newH, newC)
         XCTAssertEqual(newH.shape, [1, 4])
         XCTAssertEqual(newC.shape, [1, 4])
+    }
+
+    /// Fused gate path must produce the same output as the un-fused path —
+    /// catches transpose / concat-axis / bias-add mistakes in
+    /// `prepareForInference()`.
+    func testLSTMCellFusedEqualsUnfused() {
+        let inputSize = 7
+        let hiddenSize = 5
+        let cell = LSTMCell(inputSize: inputSize, hiddenSize: hiddenSize)
+
+        // Random but reproducible weights so the test is stable.
+        MLXRandom.seed(0xC0DEFACE)
+        let gateSize = 4 * hiddenSize
+        let params = ModuleParameters.unflattened([
+            "weight_ih": MLXRandom.normal([gateSize, inputSize]),
+            "weight_hh": MLXRandom.normal([gateSize, hiddenSize]),
+            "bias_ih":   MLXRandom.normal([gateSize]),
+            "bias_hh":   MLXRandom.normal([gateSize]),
+        ])
+        cell.update(parameters: params)
+
+        let x = MLXRandom.normal([1, inputSize])
+        let h = MLXRandom.normal([1, hiddenSize])
+        let c = MLXRandom.normal([1, hiddenSize])
+        eval(x, h, c)
+
+        // Unfused output (default path until prepareForInference is called).
+        let (unfusedH, unfusedC) = cell.step(x, h: h, c: c)
+        eval(unfusedH, unfusedC)
+        let unfusedHArr = unfusedH.asArray(Float.self)
+        let unfusedCArr = unfusedC.asArray(Float.self)
+
+        // Fused output (same instance — prepareForInference flips the path).
+        cell.prepareForInference()
+        let (fusedH, fusedC) = cell.step(x, h: h, c: c)
+        eval(fusedH, fusedC)
+        let fusedHArr = fusedH.asArray(Float.self)
+        let fusedCArr = fusedC.asArray(Float.self)
+
+        XCTAssertEqual(unfusedHArr.count, fusedHArr.count)
+        for i in 0..<unfusedHArr.count {
+            XCTAssertEqual(unfusedHArr[i], fusedHArr[i], accuracy: 1e-5,
+                "h[\(i)] differs between fused and unfused paths")
+        }
+        for i in 0..<unfusedCArr.count {
+            XCTAssertEqual(unfusedCArr[i], fusedCArr[i], accuracy: 1e-5,
+                "c[\(i)] differs between fused and unfused paths")
+        }
     }
 
     func testBiLSTMLayerOutputShape() {
