@@ -152,6 +152,67 @@ final class LSTMCellTests: XCTestCase {
 
 // MARK: - E2E Tests (require model download)
 
+final class WienerFilterMLXTests: XCTestCase {
+
+    /// MLX Wiener must match the Swift reference within FP-reordering noise on
+    /// random inputs. Tolerance is loose (1e-3 absolute) because reduction
+    /// order differs, but the algorithm produces the same stems.
+    func testMLXMatchesSwiftWiener() {
+        let nSources = 4
+        let T = 24      // 2 windows below windowLen
+        let F = 16
+        let windowLen = 10  // exercise the windowing branch
+
+        MLXRandom.seed(0xABCDEF)
+        var rng = SystemRandomNumberGenerator()
+
+        func random3(_ J: Int, _ T: Int, _ F: Int) -> [[[Float]]] {
+            (0..<J).map { _ in
+                (0..<T).map { _ in
+                    (0..<F).map { _ in Float.random(in: 0.01...1.0, using: &rng) }
+                }
+            }
+        }
+        func random2(_ T: Int, _ F: Int) -> [[Float]] {
+            (0..<T).map { _ in (0..<F).map { _ in Float.random(in: -1.0...1.0, using: &rng) } }
+        }
+
+        let tgtL = random3(nSources, T, F)
+        let tgtR = random3(nSources, T, F)
+        let mRL = random2(T, F), mIL = random2(T, F)
+        let mRR = random2(T, F), mIR = random2(T, F)
+
+        let swiftOut = WienerFilter.apply(
+            targetMagsL: tgtL, targetMagsR: tgtR,
+            mixRealL: mRL, mixImagL: mIL,
+            mixRealR: mRR, mixImagR: mIR,
+            iterations: 1, windowLen: windowLen)
+
+        let mlxOut = WienerFilterMLX.apply(
+            targetMagsL: tgtL, targetMagsR: tgtR,
+            mixRealL: mRL, mixImagL: mIL,
+            mixRealR: mRR, mixImagR: mIR,
+            iterations: 1, windowLen: windowLen)
+
+        XCTAssertEqual(swiftOut.count, mlxOut.count)
+        for j in 0..<nSources {
+            for (sw, mx) in [
+                (swiftOut[j].realL, mlxOut[j].realL),
+                (swiftOut[j].imagL, mlxOut[j].imagL),
+                (swiftOut[j].realR, mlxOut[j].realR),
+                (swiftOut[j].imagR, mlxOut[j].imagR),
+            ] {
+                for t in 0..<T {
+                    for f in 0..<F {
+                        XCTAssertEqual(sw[t][f], mx[t][f], accuracy: 1e-3,
+                            "source \(j) at (t=\(t), f=\(f)) differs")
+                    }
+                }
+            }
+        }
+    }
+}
+
 final class E2EOpenUnmixTests: XCTestCase {
 
     private static var _separator: SourceSeparator?

@@ -125,11 +125,12 @@ public final class SourceSeparator {
         var results: [SeparationTarget: [[Float]]] = [:]
 
         if wiener && targetMags.count > 1 {
-            // Multichannel Wiener EM: produces complex STFT directly
+            // Multichannel Wiener EM in MLX. Reference Swift implementation
+            // (WienerFilter) is retained for the equivalence unit test.
             let wienerStart = CFAbsoluteTimeGetCurrent()
             let allLeftMags = targetMags.map(\.left)
             let allRightMags = targetMags.map(\.right)
-            let refined = WienerFilter.apply(
+            let refined = WienerFilterMLX.apply(
                 targetMagsL: allLeftMags,
                 targetMagsR: allRightMags,
                 mixRealL: leftReal, mixImagL: leftImag,
