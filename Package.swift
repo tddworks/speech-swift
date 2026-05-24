@@ -127,7 +127,11 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.1.6"),
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", "2.5.0"..<"2.17.0"),
-        .package(url: "https://github.com/hummingbird-project/hummingbird-websocket.git", from: "2.6.0")
+        .package(url: "https://github.com/hummingbird-project/hummingbird-websocket.git", "2.6.0"..<"2.7.0"),
+        // Pin swift-websocket to 1.5.x — 1.6.0 added `import NIOSSL` in WSCore/WebSocketHandler.swift
+        // without declaring swift-nio-ssl as a target dependency, so the module is unresolvable
+        // on a clean checkout. https://github.com/hummingbird-project/swift-websocket
+        .package(url: "https://github.com/hummingbird-project/swift-websocket.git", "1.5.0"..<"1.6.0")
     ],
     targets: [
         .target(
