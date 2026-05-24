@@ -122,7 +122,40 @@ final class E2EDiagnosticsTests: XCTestCase {
     }
 
     func testLMFirstForwardMatchesPython() async throws {
-        let model = try await MAGNeTMusicGen.fromPretrained(variant: .smallInt4)
+        try await runLMFirstForwardParity(
+            variant: .smallInt4,
+            expectedCondFirst: 0.4557,
+            expectedCondFourth: 0.7347,
+            expectedUncondFirst: -0.4370)
+    }
+
+    /// Same probe as `testLMFirstForwardMatchesPython` but on the medium-int8
+    /// bundle. Catches silent weight-loading regressions in the larger model
+    /// (e.g. a renamed quantized linear key that falls through
+    /// `applyQuantizedLinearWeights` without raising and leaves the
+    /// construction-time random init in place).
+    ///
+    /// Python ground truth from speech-models/models/magnet/export, harness
+    /// in `scripts/probe_magnet_logits.py`, bundle
+    /// `aufklarer/MAGNeT-Medium-30secs-MLX-8bit`:
+    ///   cond_logits[0,0,0,:8]   = [-0.7593, -3.0587, -2.6864, -0.8878, 0.0120, -1.4776, -1.7772, -6.5137]
+    ///   uncond_logits[1,0,0,:8] = [-0.7963, -4.3300, -4.4330, -2.0338, -0.0135, -2.7047, -3.1290, -7.7294]
+    ///   stage-0 argmax histogram (top): {83: 99.9%, 172: 0.1%}
+    func testLMFirstForwardMatchesPythonMediumInt8() async throws {
+        try await runLMFirstForwardParity(
+            variant: .mediumInt8,
+            expectedCondFirst: -0.7593,
+            expectedCondFourth: -0.8878,
+            expectedUncondFirst: -0.7963)
+    }
+
+    private func runLMFirstForwardParity(
+        variant: MAGNeTVariant,
+        expectedCondFirst: Float,
+        expectedCondFourth: Float,
+        expectedUncondFirst: Float
+    ) async throws {
+        let model = try await MAGNeTMusicGen.fromPretrained(variant: variant)
 
         // Reproduce the exact Python probe: tokenize 'happy rock', T5 encode,
         // project to LM dim, build CFG batch, run LM forward at stage=0 on
@@ -137,21 +170,18 @@ final class E2EDiagnosticsTests: XCTestCase {
         let T = model.config.seqLen
         let K = model.config.nQ
         let maskId = model.config.maskTokenId
-        var gen = MLXArray.full([1, K, T], values: MLXArray(Int32(maskId)))
+        let gen = MLXArray.full([1, K, T], values: MLXArray(Int32(maskId)))
         let lmInput = MLX.concatenated([gen, gen], axis: 0).transposed(0, 2, 1)
         let allLogits = model._lm(lmInput, conditioning: conditioning, stage: 0)
         eval(allLogits)
 
-        // Print stats matching the Python probe.
         let arr = allLogits.asArray(Float.self)
-        // allLogits shape = [2, T, K, card]
         let card = model.config.card
         let cardOffset0 = 0 * card                                  // (b=0, t=0, k=0)
         let cardOffsetUncond0 = (1 * T * K + 0 * K + 0) * card      // (b=1, t=0, k=0)
-        print("[SWIFT] LM cond_logits[0,0,0,:8]   = \(Array(arr[cardOffset0..<(cardOffset0+8)]))")
-        print("[SWIFT] LM uncond_logits[1,0,0,:8] = \(Array(arr[cardOffsetUncond0..<(cardOffsetUncond0+8)]))")
+        print("[SWIFT \(variant)] LM cond_logits[0,0,0,:8]   = \(Array(arr[cardOffset0..<(cardOffset0+8)]))")
+        print("[SWIFT \(variant)] LM uncond_logits[1,0,0,:8] = \(Array(arr[cardOffsetUncond0..<(cardOffsetUncond0+8)]))")
 
-        // Argmax token histogram of stage-0 cond.
         var argmaxByT: [Int] = Array(repeating: 0, count: T)
         for t in 0..<T {
             let base = 0 * (T * K * card) + t * (K * card) + 0 * card
@@ -166,15 +196,16 @@ final class E2EDiagnosticsTests: XCTestCase {
         var hist: [Int: Int] = [:]
         for v in argmaxByT { hist[v, default: 0] += 1 }
         let top = hist.sorted { $0.value > $1.value }.prefix(5)
-        print("[SWIFT] stage-0 argmax histogram (top 5):")
+        print("[SWIFT \(variant)] stage-0 argmax histogram (top 5):")
         for (tok, count) in top {
             print("    token \(tok): \(count) times (\(Double(count) / Double(T) * 100)%)")
         }
 
-        // Spot-check first logit values vs Python.
-        XCTAssertEqual(arr[0], 0.4557, accuracy: 0.05, "cond_logits[0,0,0,0]")
-        XCTAssertEqual(arr[3], 0.7347, accuracy: 0.05, "cond_logits[0,0,0,3]")
-        XCTAssertEqual(arr[cardOffsetUncond0], -0.4370, accuracy: 0.05,
-                       "uncond_logits[1,0,0,0]")
+        XCTAssertEqual(arr[0], expectedCondFirst, accuracy: 0.05,
+                       "cond_logits[0,0,0,0] for \(variant)")
+        XCTAssertEqual(arr[3], expectedCondFourth, accuracy: 0.05,
+                       "cond_logits[0,0,0,3] for \(variant)")
+        XCTAssertEqual(arr[cardOffsetUncond0], expectedUncondFirst, accuracy: 0.05,
+                       "uncond_logits[1,0,0,0] for \(variant)")
     }
 }
