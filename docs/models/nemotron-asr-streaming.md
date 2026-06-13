@@ -80,7 +80,7 @@ decoder.mlmodelc/     29 MB  FP16 LSTM, runs on CPU
 joint.mlmodelc/       18 MB  FP16 dense, runs on CPU
 config.json           streaming geometry + dims for the loader
 vocab.json            id → piece
-tokenizer.model       optional; real SentencePiece model for word boosting phrase tokenization
+tokenizer.model       SentencePiece Unigram model used for word-boosting phrase tokenization (shipped in the current bundle; older bundles may omit it and the SDK then falls back to greedy vocab.json segmentation)
 languages.json        promptDictionary: lang tag → slot
 ```
 

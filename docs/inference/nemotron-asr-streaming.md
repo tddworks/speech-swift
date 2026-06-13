@@ -68,17 +68,22 @@ let session = try model.createSession(
 )
 ```
 
-When a bundle includes `tokenizer.model`, word boosting uses that real SentencePiece tokenizer to produce the same canonical token path the model expects. The phrase text is treated as canonical, including casing. If no tokenizer model is present, the SDK falls back to a conservative `vocab.json` segmentation; this fallback is intentionally narrower and less reliable for fragmented custom words.
+Word boosting uses the real SentencePiece Unigram tokenizer (shipped as `tokenizer.model` alongside `vocab.json` in the `aufklarer/Nemotron-3.5-ASR-Streaming-0.6B-CoreML-INT8` bundle) to produce the same canonical token path the decoder emits. The phrase text is treated as canonical, including casing. Older bundles that ship only `vocab.json` fall back to greedy longest-match segmentation — this fallback is narrower and silently no-ops on fragmented OOV terms because the phrase token IDs diverge from what the decoder actually emits.
 
 Check which tokenizer mode loaded at runtime:
 
 ```swift
 switch model.wordBoostingTokenizerStatus.mode {
 case .sentencePieceModel:
-    // tokenizer.model found; boost paths match the decoder's segmentation.
+    // tokenizer.model found (default for current bundles); boost paths
+    // match the decoder's segmentation and a configured boost reliably
+    // changes greedy decisions when the matcher advances.
     break
 case .vocabFallback:
-    // Degraded: greedy vocab.json segmentation only.
+    // Older bundle without tokenizer.model. Greedy vocab.json
+    // segmentation only — boosting OOV brand/technical terms may
+    // silently no-op because the phrase token IDs diverge from the
+    // decoder's output IDs. Re-download or upgrade the bundle.
     break
 }
 ```
