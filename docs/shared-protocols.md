@@ -475,6 +475,26 @@ All model classes are **not thread-safe** by design. ML inference is inherently 
 
 ## Error Handling
 
+### Realtime WebSocket errors
+
+The `/v1/realtime` websocket returns OpenAI-style error events instead of
+closing the connection for recoverable request or model-processing failures:
+
+```json
+{
+  "type": "error",
+  "error": {
+    "type": "server_error",
+    "message": "Realtime event 'response.create' failed: ...",
+    "event_type": "response.create"
+  }
+}
+```
+
+Client request errors use `invalid_request_error`. Failures thrown while
+processing a valid realtime event use `server_error` and include `event_type`
+so clients can associate the error with the message that failed.
+
 ### AudioModelError
 
 Unified error type in `AudioCommon` for cross-module error reporting:

@@ -18,6 +18,12 @@ import XCTest
 final class E2ERealtimeAPIEnginesTests: XCTestCase {
     static var serverTask: Task<Void, Error>?
     static let port = 19386
+    private static let webSocketSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 300
+        config.timeoutIntervalForResource = 900
+        return URLSession(configuration: config)
+    }()
 
     override class func setUp() {
         super.setUp()
@@ -38,7 +44,9 @@ final class E2ERealtimeAPIEnginesTests: XCTestCase {
 
     private func connect() async throws -> URLSessionWebSocketTask {
         let url = URL(string: "ws://127.0.0.1:\(Self.port)/v1/realtime")!
-        let ws = URLSession.shared.webSocketTask(with: url)
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 300
+        let ws = Self.webSocketSession.webSocketTask(with: request)
         ws.resume()
         return ws
     }

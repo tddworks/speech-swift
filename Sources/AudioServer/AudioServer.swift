@@ -25,24 +25,39 @@ import AudioCommon
 
 public struct AudioServer {
     let state: ModelState
+    let realtimeState: any RealtimeModelLoading
     let host: String
     let port: Int
 
     public init(host: String = "127.0.0.1", port: Int = 8080, preload: Bool = false) {
-        self.state = ModelState()
+        let state = ModelState()
+        self.state = state
+        self.realtimeState = state
+        self.host = host
+        self.port = port
+    }
+
+    init(
+        host: String = "127.0.0.1",
+        port: Int = 8080,
+        state: ModelState = ModelState(),
+        realtimeState: any RealtimeModelLoading
+    ) {
+        self.state = state
+        self.realtimeState = realtimeState
         self.host = host
         self.port = port
     }
 
     public func run() async throws {
         let router = buildRouter()
-        let state = self.state
+        let realtimeState = self.realtimeState
         let wsConfig = WebSocketServerConfiguration(maxFrameSize: 1 << 24)  // 16 MB max frame
         let wsServer: HTTPServerBuilder = .http1WebSocketUpgrade(configuration: wsConfig) { head, _, _ in
             let path = head.path ?? ""
             guard path == "/v1/realtime" else { return .dontUpgrade }
             return .upgrade([:]) { inbound, outbound, _ in
-                try await handleRealtimeWS(inbound: inbound, outbound: outbound, state: state)
+                try await handleRealtimeWS(inbound: inbound, outbound: outbound, state: realtimeState)
             }
         }
         let app = Application(
@@ -74,6 +89,7 @@ public struct AudioServer {
 
         // Shared row builder so the two model-list endpoints can't drift
         // apart in shape.
+        @Sendable
         func modelRow(_ v: ModelVariant) -> [String: Any] {
             return [
                 "id": v.name,
@@ -317,7 +333,110 @@ public struct AudioServer {
 
 // MARK: - Lazy Model State
 
-final class ModelState: @unchecked Sendable {
+protocol RealtimeModelLoading: Sendable {
+    func loadQwen3ASR(modelId: String) async throws -> Qwen3ASRModel
+    func loadParakeet(modelId: String) async throws -> ParakeetASRModel
+    func loadParakeetStreaming(modelId: String) async throws -> ParakeetStreamingASRModel
+    func loadNemotron(modelId: String) async throws -> NemotronStreamingASRModel
+    func loadOmnilingual(modelId: String) async throws -> OmnilingualASRModel
+    func loadQwen3TTS(modelId: String) async throws -> Qwen3TTSModel
+    func loadCosyVoice(modelId: String) async throws -> CosyVoiceTTSModel
+    func loadKokoro(modelId: String) async throws -> KokoroTTSModel
+    func loadVoxCPM2(modelId: String) async throws -> VoxCPM2TTSModel
+    func loadMagpie() async throws -> MagpieTTS
+    func loadMagpieCoreML() async throws -> MagpieTTSCoreML
+    func loadQwen3TTSCoreML(modelId: String) async throws -> Qwen3TTSCoreMLModel
+    func loadVibeVoice(modelId: String) async throws -> VibeVoiceTTSModel
+    func loadVibeVoice15B(modelId: String) async throws -> VibeVoice15BTTSModel
+    func loadHibiki(modelId: String) async throws -> HibikiTranslateModel
+    func loadPersonaPlex() async throws -> PersonaPlexModel
+}
+
+struct RealtimeModelLoadingFailure: Error, CustomStringConvertible {
+    let description: String
+
+    init(_ description: String = "forced realtime model failure") {
+        self.description = description
+    }
+}
+
+final class FailingRealtimeModelLoading: RealtimeModelLoading, @unchecked Sendable {
+    let error: Error
+
+    init(error: Error = RealtimeModelLoadingFailure()) {
+        self.error = error
+    }
+
+    private func fail<T>() async throws -> T {
+        throw error
+    }
+
+    func loadQwen3ASR(modelId: String) async throws -> Qwen3ASRModel {
+        try await fail()
+    }
+
+    func loadParakeet(modelId: String) async throws -> ParakeetASRModel {
+        try await fail()
+    }
+
+    func loadParakeetStreaming(modelId: String) async throws -> ParakeetStreamingASRModel {
+        try await fail()
+    }
+
+    func loadNemotron(modelId: String) async throws -> NemotronStreamingASRModel {
+        try await fail()
+    }
+
+    func loadOmnilingual(modelId: String) async throws -> OmnilingualASRModel {
+        try await fail()
+    }
+
+    func loadQwen3TTS(modelId: String) async throws -> Qwen3TTSModel {
+        try await fail()
+    }
+
+    func loadCosyVoice(modelId: String) async throws -> CosyVoiceTTSModel {
+        try await fail()
+    }
+
+    func loadKokoro(modelId: String) async throws -> KokoroTTSModel {
+        try await fail()
+    }
+
+    func loadVoxCPM2(modelId: String) async throws -> VoxCPM2TTSModel {
+        try await fail()
+    }
+
+    func loadMagpie() async throws -> MagpieTTS {
+        try await fail()
+    }
+
+    func loadMagpieCoreML() async throws -> MagpieTTSCoreML {
+        try await fail()
+    }
+
+    func loadQwen3TTSCoreML(modelId: String) async throws -> Qwen3TTSCoreMLModel {
+        try await fail()
+    }
+
+    func loadVibeVoice(modelId: String) async throws -> VibeVoiceTTSModel {
+        try await fail()
+    }
+
+    func loadVibeVoice15B(modelId: String) async throws -> VibeVoice15BTTSModel {
+        try await fail()
+    }
+
+    func loadHibiki(modelId: String) async throws -> HibikiTranslateModel {
+        try await fail()
+    }
+
+    func loadPersonaPlex() async throws -> PersonaPlexModel {
+        try await fail()
+    }
+}
+
+final class ModelState: RealtimeModelLoading, @unchecked Sendable {
     // Per-modelId caches: switching variants of the same engine (e.g.
     // qwen3-asr-0.6b → qwen3-asr-1.7b) keeps both loaded so flipping back
     // is instant. The typical session picks one variant and sticks, but
@@ -661,7 +780,7 @@ func resolveModelToEngine(_ model: String) -> String? {
 func handleRealtimeWS(
     inbound: WebSocketInboundStream,
     outbound: WebSocketOutboundWriter,
-    state: ModelState
+    state: any RealtimeModelLoading
 ) async throws {
     let session = RealtimeSession()
     let sessionId = UUID().uuidString
@@ -679,238 +798,319 @@ func handleRealtimeWS(
             continue
         }
 
-        switch eventType {
+        do {
+            switch eventType {
 
-        case "session.update":
-            if let sessionConfig = json["session"] as? [String: Any] {
-                // Top-level `model`: walk the registry, update whichever
-                // slots match. Bare "qwen3" updates both ASR and TTS
-                // (they share the alias); "voxcpm2" updates only TTS;
-                // "hibiki" updates only S2S. Unknown names are accepted
-                // and echoed without touching any slot.
-                if let modelName = sessionConfig["model"] as? String, !modelName.isEmpty {
-                    session.model = modelName
-                    let variants = resolveAllVariants(modelName)
-                    let pickedS2S = variants.first(where: { $0.kind == .s2s })
-                    for v in variants {
-                        switch v.kind {
-                        case .asr: session.asrVariant = v
-                        case .tts: session.ttsVariant = v
-                        case .s2s: session.s2sVariant = v
-                        case .enhance, .music, .vad, .diarize,
-                             .speaker, .separate, .sr:
-                            // Cataloged in the registry for discovery via
-                            // /v1/models, but the Realtime session protocol
-                            // has no slot for these — they're routed via
-                            // dedicated HTTP endpoints (/enhance, /compose,
-                            // /diarize, …). No-op on session.update.
-                            break
-                        }
-                    }
-                    // S2S is exclusive — picking a recognized ASR/TTS-only
-                    // model turns S2S off so the user gets the compose
-                    // path back. Also drop any pending S2S input audio so
-                    // the next response.create starts clean.
-                    if pickedS2S == nil && !variants.isEmpty {
-                        session.s2sVariant = nil
-                        session.lastCommittedAudio = nil
-                    }
-                }
-                // OpenAI-standard: `input_audio_transcription.model` selects
-                // the ASR backend independently of the top-level model.
-                if let iat = sessionConfig["input_audio_transcription"] as? [String: Any],
-                   let asrModel = iat["model"] as? String,
-                   let asr = resolveModelToASRVariant(asrModel) {
-                    session.asrVariant = asr
-                }
-                // Legacy `engine` field used to control TTS dispatch only.
-                // Preserve that — store the raw string for the echo and
-                // update the TTS variant if the name resolves.
-                if let engine = sessionConfig["engine"] as? String {
-                    session.legacyEngine = engine
-                    if let tts = resolveModelToTTSVariant(engine) {
-                        session.ttsVariant = tts
-                    }
-                }
-                if let lang = sessionConfig["language"] as? String {
-                    session.language = lang
-                }
-                if let v = sessionConfig["voice"] as? String, !v.isEmpty {
-                    session.voice = v
-                }
-                if let fmt = sessionConfig["input_audio_format"] as? String, fmt == "pcm16" {
-                    session.inputSampleRate = 24000
-                }
-                // Voice-cloning reference. PCM16 24 kHz, base64-encoded.
-                // Setting this routes the next response.create to VoxCPM2
-                // regardless of the active TTS engine. Guard against empty
-                // / malformed payloads so we never hand VoxCPM2 a zero-
-                // length reference that the model can't condition on.
-                if let vc = sessionConfig["voice_cloning"] as? [String: Any] {
-                    if let refB64 = vc["reference_audio"] as? String,
-                       let refData = Data(base64Encoded: refB64), !refData.isEmpty {
-                        let samples = pcm16LEToFloat(refData)
-                        if !samples.isEmpty {
-                            session.voiceCloneReferenceAudio = samples
-                        }
-                    }
-                    if let refText = vc["reference_text"] as? String, !refText.isEmpty {
-                        session.voiceCloneReferenceText = refText
-                    }
-                }
-            }
-            try await outbound.write(.text(formatJSON(sessionEnvelope(id: sessionId, session: session, type: "session.updated"))))
-
-        case "input_audio_buffer.append":
-            guard let audioB64 = json["audio"] as? String,
-                  let audioData = Data(base64Encoded: audioB64) else {
-                try await sendRealtimeError(outbound: outbound, message: "Missing or invalid 'audio' field")
-                continue
-            }
-            session.inputAudioBuffer.append(audioData)
-
-        case "input_audio_buffer.clear":
-            session.inputAudioBuffer.removeAll()
-            try await outbound.write(.text(formatJSON([
-                "type": "input_audio_buffer.cleared"
-            ])))
-
-        case "input_audio_buffer.commit":
-            let audioData = session.inputAudioBuffer
-            session.inputAudioBuffer.removeAll()
-
-            guard !audioData.isEmpty else {
-                try await sendRealtimeError(outbound: outbound, message: "Audio buffer is empty")
-                continue
-            }
-
-            let itemId = UUID().uuidString
-            try await outbound.write(.text(formatJSON([
-                "type": "input_audio_buffer.committed",
-                "item_id": itemId
-            ])))
-
-            let floats24k = pcm16LEToFloat(audioData)
-
-            // S2S precedence: when an S2S variant is active, commit stores
-            // the audio at the protocol rate (24 kHz mono) for the next
-            // response.create to consume. No transcription is emitted —
-            // the S2S model produces text as part of generation.
-            if session.s2sVariant != nil {
-                session.lastCommittedAudio = floats24k
-                continue
-            }
-
-            // Compose path: transcribe via the active ASR variant. Every
-            // ASR engine expects 16 kHz mono Float32; resample once.
-            let audio16k = resample(floats24k, from: session.inputSampleRate, to: 16000)
-            let asr = session.asrVariant
-            let text: String
-            switch asr.engine {
-            case "parakeet":
-                let model = try await state.loadParakeet(modelId: asr.modelId)
-                text = (try? model.transcribeAudio(audio16k, sampleRate: 16000, language: nil)) ?? ""
-            case "parakeet-streaming":
-                let model = try await state.loadParakeetStreaming(modelId: asr.modelId)
-                text = (try? model.transcribeAudio(audio16k, sampleRate: 16000, language: session.language)) ?? ""
-            case "nemotron":
-                let model = try await state.loadNemotron(modelId: asr.modelId)
-                text = (try? model.transcribeAudio(audio16k, sampleRate: 16000, language: session.language)) ?? ""
-            case "omnilingual":
-                let model = try await state.loadOmnilingual(modelId: asr.modelId)
-                text = (try? model.transcribeAudio(audio16k, sampleRate: 16000, language: session.language)) ?? ""
-            case "qwen3-asr":
-                let model = try await state.loadQwen3ASR(modelId: asr.modelId)
-                text = model.transcribe(audio: audio16k, sampleRate: 16000)
-            default:
-                try await sendRealtimeError(outbound: outbound,
-                    message: "ASR engine '\(asr.engine)' is not enabled in this build")
-                continue
-            }
-
-            let responseId = UUID().uuidString
-            try await outbound.write(.text(formatJSON([
-                "type": "conversation.item.input_audio_transcription.completed",
-                "item_id": itemId,
-                "transcript": text
-            ])))
-
-            // Also emit as a response for clients expecting response.* events
-            try await outbound.write(.text(formatJSON([
-                "type": "response.created",
-                "response": ["id": responseId, "status": "in_progress"]
-            ] as [String: Any])))
-            try await outbound.write(.text(formatJSON([
-                "type": "response.audio_transcript.delta",
-                "response_id": responseId,
-                "delta": text
-            ])))
-            try await outbound.write(.text(formatJSON([
-                "type": "response.audio_transcript.done",
-                "response_id": responseId,
-                "transcript": text
-            ])))
-            try await outbound.write(.text(formatJSON([
-                "type": "response.done",
-                "response": ["id": responseId, "status": "completed"]
-            ] as [String: Any])))
-
-        case "response.create":
-            let input = json["response"] as? [String: Any]
-            let instructions = input?["instructions"] as? String
-            let modalities = input?["modalities"] as? [String] ?? ["audio", "text"]
-            let responseId = UUID().uuidString
-
-            // If there's text to speak (from instructions or input items)
-            var textToSpeak: String?
-
-            if let instructions = instructions, !instructions.isEmpty {
-                textToSpeak = instructions
-            }
-
-            // Check for input items with text content
-            if textToSpeak == nil, let inputItems = input?["input"] as? [[String: Any]] {
-                for item in inputItems {
-                    if let content = item["content"] as? [[String: Any]] {
-                        for part in content {
-                            if part["type"] as? String == "input_text",
-                               let text = part["text"] as? String {
-                                textToSpeak = text
+            case "session.update":
+                if let sessionConfig = json["session"] as? [String: Any] {
+                    // Top-level `model`: walk the registry, update whichever
+                    // slots match. Bare "qwen3" updates both ASR and TTS
+                    // (they share the alias); "voxcpm2" updates only TTS;
+                    // "hibiki" updates only S2S. Unknown names are accepted
+                    // and echoed without touching any slot.
+                    if let modelName = sessionConfig["model"] as? String, !modelName.isEmpty {
+                        session.model = modelName
+                        let variants = resolveAllVariants(modelName)
+                        let pickedS2S = variants.first(where: { $0.kind == .s2s })
+                        for v in variants {
+                            switch v.kind {
+                            case .asr: session.asrVariant = v
+                            case .tts: session.ttsVariant = v
+                            case .s2s: session.s2sVariant = v
+                            case .enhance, .music, .vad, .diarize,
+                                 .speaker, .separate, .sr:
+                                // Cataloged in the registry for discovery via
+                                // /v1/models, but the Realtime session protocol
+                                // has no slot for these — they're routed via
+                                // dedicated HTTP endpoints (/enhance, /compose,
+                                // /diarize, …). No-op on session.update.
+                                break
                             }
                         }
+                        // S2S is exclusive — picking a recognized ASR/TTS-only
+                        // model turns S2S off so the user gets the compose
+                        // path back. Also drop any pending S2S input audio so
+                        // the next response.create starts clean.
+                        if pickedS2S == nil && !variants.isEmpty {
+                            session.s2sVariant = nil
+                            session.lastCommittedAudio = nil
+                        }
+                    }
+                    // OpenAI-standard: `input_audio_transcription.model` selects
+                    // the ASR backend independently of the top-level model.
+                    if let iat = sessionConfig["input_audio_transcription"] as? [String: Any],
+                       let asrModel = iat["model"] as? String,
+                       let asr = resolveModelToASRVariant(asrModel) {
+                        session.asrVariant = asr
+                    }
+                    // Legacy `engine` field used to control TTS dispatch only.
+                    // Preserve that — store the raw string for the echo and
+                    // update the TTS variant if the name resolves.
+                    if let engine = sessionConfig["engine"] as? String {
+                        session.legacyEngine = engine
+                        if let tts = resolveModelToTTSVariant(engine) {
+                            session.ttsVariant = tts
+                        }
+                    }
+                    if let lang = sessionConfig["language"] as? String {
+                        session.language = lang
+                    }
+                    if let v = sessionConfig["voice"] as? String, !v.isEmpty {
+                        session.voice = v
+                    }
+                    if let fmt = sessionConfig["input_audio_format"] as? String, fmt == "pcm16" {
+                        session.inputSampleRate = 24000
+                    }
+                    // Voice-cloning reference. PCM16 24 kHz, base64-encoded.
+                    // Setting this routes the next response.create to VoxCPM2
+                    // regardless of the active TTS engine. Guard against empty
+                    // / malformed payloads so we never hand VoxCPM2 a zero-
+                    // length reference that the model can't condition on.
+                    if let vc = sessionConfig["voice_cloning"] as? [String: Any] {
+                        if let refB64 = vc["reference_audio"] as? String,
+                           let refData = Data(base64Encoded: refB64), !refData.isEmpty {
+                            let samples = pcm16LEToFloat(refData)
+                            if !samples.isEmpty {
+                                session.voiceCloneReferenceAudio = samples
+                            }
+                        }
+                        if let refText = vc["reference_text"] as? String, !refText.isEmpty {
+                            session.voiceCloneReferenceText = refText
+                        }
                     }
                 }
-            }
+                try await outbound.write(.text(formatJSON(sessionEnvelope(id: sessionId, session: session, type: "session.updated"))))
 
-            // Also check conversation.item.create pattern — text in input
-            if textToSpeak == nil, let text = input?["text"] as? String {
-                textToSpeak = text
-            }
+            case "input_audio_buffer.append":
+                guard let audioB64 = json["audio"] as? String,
+                      let audioData = Data(base64Encoded: audioB64) else {
+                    try await sendRealtimeError(outbound: outbound, message: "Missing or invalid 'audio' field")
+                    continue
+                }
+                session.inputAudioBuffer.append(audioData)
 
-            // S2S precedence: when an S2S variant is active AND a prior
-            // `input_audio_buffer.commit` left audio on the session, run
-            // the S2S model on that audio. Text input is ignored — S2S
-            // is audio-driven and produces its own transcript as part of
-            // generation.
-            if let s2s = session.s2sVariant, let userAudio = session.lastCommittedAudio {
-                session.lastCommittedAudio = nil
+            case "input_audio_buffer.clear":
+                session.inputAudioBuffer.removeAll()
+                try await outbound.write(.text(formatJSON([
+                    "type": "input_audio_buffer.cleared"
+                ])))
+
+            case "input_audio_buffer.commit":
+                let audioData = session.inputAudioBuffer
+                session.inputAudioBuffer.removeAll()
+
+                guard !audioData.isEmpty else {
+                    try await sendRealtimeError(outbound: outbound, message: "Audio buffer is empty")
+                    continue
+                }
+
+                let itemId = UUID().uuidString
+                try await outbound.write(.text(formatJSON([
+                    "type": "input_audio_buffer.committed",
+                    "item_id": itemId
+                ])))
+
+                let floats24k = pcm16LEToFloat(audioData)
+
+                // S2S precedence: when an S2S variant is active, commit stores
+                // the audio at the protocol rate (24 kHz mono) for the next
+                // response.create to consume. No transcription is emitted —
+                // the S2S model produces text as part of generation.
+                if session.s2sVariant != nil {
+                    session.lastCommittedAudio = floats24k
+                    continue
+                }
+
+                // Compose path: transcribe via the active ASR variant. Every
+                // ASR engine expects 16 kHz mono Float32; resample once.
+                let audio16k = resample(floats24k, from: session.inputSampleRate, to: 16000)
+                let asr = session.asrVariant
+                let text: String
+                switch asr.engine {
+                case "parakeet":
+                    let model = try await state.loadParakeet(modelId: asr.modelId)
+                    text = (try? model.transcribeAudio(audio16k, sampleRate: 16000, language: nil)) ?? ""
+                case "parakeet-streaming":
+                    let model = try await state.loadParakeetStreaming(modelId: asr.modelId)
+                    text = (try? model.transcribeAudio(audio16k, sampleRate: 16000, language: session.language)) ?? ""
+                case "nemotron":
+                    let model = try await state.loadNemotron(modelId: asr.modelId)
+                    text = (try? model.transcribeAudio(audio16k, sampleRate: 16000, language: session.language)) ?? ""
+                case "omnilingual":
+                    let model = try await state.loadOmnilingual(modelId: asr.modelId)
+                    text = (try? model.transcribeAudio(audio16k, sampleRate: 16000, language: session.language)) ?? ""
+                case "qwen3-asr":
+                    let model = try await state.loadQwen3ASR(modelId: asr.modelId)
+                    text = model.transcribe(audio: audio16k, sampleRate: 16000)
+                default:
+                    try await sendRealtimeError(outbound: outbound,
+                        message: "ASR engine '\(asr.engine)' is not enabled in this build")
+                    continue
+                }
+
+                let responseId = UUID().uuidString
+                try await outbound.write(.text(formatJSON([
+                    "type": "conversation.item.input_audio_transcription.completed",
+                    "item_id": itemId,
+                    "transcript": text
+                ])))
+
+                // Also emit as a response for clients expecting response.* events
                 try await outbound.write(.text(formatJSON([
                     "type": "response.created",
                     "response": ["id": responseId, "status": "in_progress"]
                 ] as [String: Any])))
-                var s2sTotalSamples = 0
-                switch s2s.engine {
-                case "personaplex":
-                    let model = try await state.loadPersonaPlex()
-                    let voice = PersonaPlexVoice(rawValue: session.voice ?? "")
-                        ?? .NATM0
-                    let stream = model.respondStream(
-                        userAudio: userAudio,
-                        voice: voice,
-                        systemPromptTokens: nil)
+                try await outbound.write(.text(formatJSON([
+                    "type": "response.audio_transcript.delta",
+                    "response_id": responseId,
+                    "delta": text
+                ])))
+                try await outbound.write(.text(formatJSON([
+                    "type": "response.audio_transcript.done",
+                    "response_id": responseId,
+                    "transcript": text
+                ])))
+                try await outbound.write(.text(formatJSON([
+                    "type": "response.done",
+                    "response": ["id": responseId, "status": "completed"]
+                ] as [String: Any])))
+
+            case "response.create":
+                let input = json["response"] as? [String: Any]
+                let instructions = input?["instructions"] as? String
+                let modalities = input?["modalities"] as? [String] ?? ["audio", "text"]
+                let responseId = UUID().uuidString
+
+                // If there's text to speak (from instructions or input items)
+                var textToSpeak: String?
+
+                if let instructions = instructions, !instructions.isEmpty {
+                    textToSpeak = instructions
+                }
+
+                // Check for input items with text content
+                if textToSpeak == nil, let inputItems = input?["input"] as? [[String: Any]] {
+                    for item in inputItems {
+                        if let content = item["content"] as? [[String: Any]] {
+                            for part in content {
+                                if part["type"] as? String == "input_text",
+                                   let text = part["text"] as? String {
+                                    textToSpeak = text
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Also check conversation.item.create pattern — text in input
+                if textToSpeak == nil, let text = input?["text"] as? String {
+                    textToSpeak = text
+                }
+
+                // S2S precedence: when an S2S variant is active AND a prior
+                // `input_audio_buffer.commit` left audio on the session, run
+                // the S2S model on that audio. Text input is ignored — S2S
+                // is audio-driven and produces its own transcript as part of
+                // generation.
+                if let s2s = session.s2sVariant, let userAudio = session.lastCommittedAudio {
+                    session.lastCommittedAudio = nil
+                    try await outbound.write(.text(formatJSON([
+                        "type": "response.created",
+                        "response": ["id": responseId, "status": "in_progress"]
+                    ] as [String: Any])))
+                    var s2sTotalSamples = 0
+                    switch s2s.engine {
+                    case "personaplex":
+                        let model = try await state.loadPersonaPlex()
+                        let voice = PersonaPlexVoice(rawValue: session.voice ?? "")
+                            ?? .NATM0
+                        let result = model.respond(
+                            userAudio: userAudio,
+                            voice: voice,
+                            systemPromptTokens: nil,
+                            maxSteps: 200)
+                        s2sTotalSamples += try await streamSamplesAsDeltas(
+                            result.audio, outbound: outbound, responseId: responseId)
+                    case "hibiki":
+                        let model = try await state.loadHibiki(modelId: s2s.modelId)
+                        let sourceLang = HibikiSourceLanguage(
+                            rawValue: mapToHibikiSourceLanguage(session.language)) ?? .fr
+                        let result = model.translate(sourceAudio: userAudio, sourceLanguage: sourceLang)
+                        s2sTotalSamples += try await streamSamplesAsDeltas(
+                            result.audio, outbound: outbound, responseId: responseId)
+                    default:
+                        try await sendRealtimeError(outbound: outbound,
+                            message: "S2S engine '\(s2s.engine)' is not enabled in this build")
+                        continue
+                    }
+                    try await outbound.write(.text(formatJSON([
+                        "type": "response.audio.done",
+                        "response_id": responseId
+                    ])))
+                    let duration = Double(s2sTotalSamples) / 24000.0
+                    try await outbound.write(.text(formatJSON([
+                        "type": "response.done",
+                        "response": [
+                            "id": responseId,
+                            "status": "completed",
+                            "usage": ["total_tokens": 0, "output_tokens": 0],
+                            "output": [
+                                ["type": "audio", "duration": round(duration * 100) / 100, "sample_rate": 24000]
+                            ]
+                        ]
+                    ] as [String: Any])))
+                    continue
+                }
+
+                guard let text = textToSpeak else {
+                    try await sendRealtimeError(outbound: outbound, message: "No text to synthesize")
+                    continue
+                }
+
+                try await outbound.write(.text(formatJSON([
+                    "type": "response.created",
+                    "response": ["id": responseId, "status": "in_progress"]
+                ] as [String: Any])))
+
+                // Stream TTS audio as base64 PCM16 24 kHz chunks. The per-request
+                // `engine` override mirrors the session field's legacy semantics
+                // (TTS only). Voice-cloning requests are routed to VoxCPM2 even
+                // if the active engine is something else.
+                let perRequestEngine = input?["engine"] as? String
+                let language = (input?["language"] as? String) ?? session.language
+                let hasCloneReference = session.voiceCloneReferenceAudio != nil
+                let ttsVariant: ModelVariant
+                if hasCloneReference {
+                    // Cloning forces VoxCPM2. If the session already has a
+                    // VoxCPM2 variant selected (bf16, int8, etc.), keep that
+                    // exact bundle — the user picked it for a reason.
+                    // Otherwise fall back to the default VoxCPM2 variant.
+                    if session.ttsVariant.engine == "voxcpm2" {
+                        ttsVariant = session.ttsVariant
+                    } else {
+                        ttsVariant = resolveModelToTTSVariant("voxcpm2") ?? session.ttsVariant
+                    }
+                } else if let perRequestEngine, !perRequestEngine.isEmpty,
+                          let v = resolveModelToTTSVariant(perRequestEngine) {
+                    ttsVariant = v
+                } else {
+                    ttsVariant = session.ttsVariant
+                }
+                var totalSamples = 0
+
+                switch ttsVariant.engine {
+                case "kokoro":
+                    let model = try await state.loadKokoro(modelId: ttsVariant.modelId)
+                    let langCode = mapToKokoroLanguageCode(language)
+                    let samples = try model.synthesize(text: text, language: langCode)
+                    totalSamples += try await streamSamplesAsDeltas(
+                        samples, outbound: outbound, responseId: responseId)
+                case "qwen3-tts":
+                    let model = try await state.loadQwen3TTS(modelId: ttsVariant.modelId)
+                    let stream = model.synthesizeStream(text: text, language: language)
                     for try await chunk in stream {
                         if !chunk.samples.isEmpty {
-                            s2sTotalSamples += chunk.samples.count
+                            totalSamples += chunk.samples.count
                             let pcm = floatToPCM16LE(chunk.samples)
                             try await outbound.write(.text(formatJSON([
                                 "type": "response.audio.delta",
@@ -919,220 +1119,171 @@ func handleRealtimeWS(
                             ])))
                         }
                     }
-                case "hibiki":
-                    let model = try await state.loadHibiki(modelId: s2s.modelId)
-                    let sourceLang = HibikiSourceLanguage(
-                        rawValue: mapToHibikiSourceLanguage(session.language)) ?? .fr
-                    let result = model.translate(sourceAudio: userAudio, sourceLanguage: sourceLang)
-                    s2sTotalSamples += try await streamSamplesAsDeltas(
-                        result.audio, outbound: outbound, responseId: responseId)
+                case "cosyvoice":
+                    let model = try await state.loadCosyVoice(modelId: ttsVariant.modelId)
+                    let stream = model.synthesizeStream(text: text, language: language)
+                    for try await chunk in stream {
+                        if !chunk.samples.isEmpty {
+                            totalSamples += chunk.samples.count
+                            let pcm = floatToPCM16LE(chunk.samples)
+                            try await outbound.write(.text(formatJSON([
+                                "type": "response.audio.delta",
+                                "response_id": responseId,
+                                "delta": pcm.base64EncodedString()
+                            ])))
+                        }
+                    }
+                case "voxcpm2":
+                    let model = try await state.loadVoxCPM2(modelId: ttsVariant.modelId)
+                    let samples: [Float]
+                    if hasCloneReference {
+                        samples = try await model.generateVoxCPM2(
+                            text: text,
+                            language: language,
+                            refText: session.voiceCloneReferenceText,
+                            refAudio: session.voiceCloneReferenceAudio)
+                    } else {
+                        samples = try await model.generate(text: text, language: language)
+                    }
+                    // VoxCPM2 runs at 48 kHz internally; downsample to the 24 kHz
+                    // the Realtime protocol expects.
+                    let samples24k = model.outputSampleRate == 24000
+                        ? samples
+                        : resample(samples, from: model.outputSampleRate, to: 24000)
+                    totalSamples += try await streamSamplesAsDeltas(
+                        samples24k, outbound: outbound, responseId: responseId)
+                case "magpie":
+                    let model = try await state.loadMagpie()
+                    let magpieLang = MagpieLanguage(code: mapToMagpieLanguageCode(language))
+                        ?? .english
+                    let samples22k = try model.synthesize(text: text, language: magpieLang)
+                    // Magpie emits 22.05 kHz; resample to the 24 kHz protocol rate.
+                    let samples24k = resample(samples22k, from: MagpieTTS.sampleRate, to: 24000)
+                    totalSamples += try await streamSamplesAsDeltas(
+                        samples24k, outbound: outbound, responseId: responseId)
+                case "magpie-coreml":
+                    let model = try await state.loadMagpieCoreML()
+                    let magpieLang = MagpieCoreMLLanguage(rawValue: mapToMagpieLanguageCode(language))
+                        ?? .english
+                    let samples22k = try model.synthesize(text: text, language: magpieLang)
+                    let samples24k = resample(samples22k, from: MagpieTTSCoreML.sampleRate, to: 24000)
+                    totalSamples += try await streamSamplesAsDeltas(
+                        samples24k, outbound: outbound, responseId: responseId)
+                case "qwen3-tts-coreml":
+                    let model = try await state.loadQwen3TTSCoreML(modelId: ttsVariant.modelId)
+                    let samples = try model.synthesize(text: text, language: language)
+                    totalSamples += try await streamSamplesAsDeltas(
+                        samples, outbound: outbound, responseId: responseId)
+                case "vibevoice":
+                    let model = try await state.loadVibeVoice(modelId: ttsVariant.modelId)
+                    let samples = try await model.generate(text: text, language: language)
+                    totalSamples += try await streamSamplesAsDeltas(
+                        samples, outbound: outbound, responseId: responseId)
+                case "vibevoice-1.5b":
+                    let model = try await state.loadVibeVoice15B(modelId: ttsVariant.modelId)
+                    let samples = try await model.generate(text: text, language: language)
+                    totalSamples += try await streamSamplesAsDeltas(
+                        samples, outbound: outbound, responseId: responseId)
                 default:
                     try await sendRealtimeError(outbound: outbound,
-                        message: "S2S engine '\(s2s.engine)' is not enabled in this build")
+                        message: "TTS engine '\(ttsVariant.engine)' is not enabled in this build")
                     continue
                 }
+
+                if modalities.contains("text") {
+                    try await outbound.write(.text(formatJSON([
+                        "type": "response.audio_transcript.done",
+                        "response_id": responseId,
+                        "transcript": text
+                    ])))
+                }
+
                 try await outbound.write(.text(formatJSON([
                     "type": "response.audio.done",
                     "response_id": responseId
                 ])))
-                let duration = Double(s2sTotalSamples) / 24000.0
+
+                let duration = Double(totalSamples) / 24000.0
                 try await outbound.write(.text(formatJSON([
                     "type": "response.done",
                     "response": [
                         "id": responseId,
                         "status": "completed",
-                        "usage": ["total_tokens": 0, "output_tokens": 0],
+                        "usage": [
+                            "total_tokens": 0,
+                            "output_tokens": 0
+                        ],
                         "output": [
                             ["type": "audio", "duration": round(duration * 100) / 100, "sample_rate": 24000]
                         ]
                     ]
                 ] as [String: Any])))
-                continue
-            }
 
-            guard let text = textToSpeak else {
-                try await sendRealtimeError(outbound: outbound, message: "No text to synthesize")
-                continue
-            }
-
-            try await outbound.write(.text(formatJSON([
-                "type": "response.created",
-                "response": ["id": responseId, "status": "in_progress"]
-            ] as [String: Any])))
-
-            // Stream TTS audio as base64 PCM16 24 kHz chunks. The per-request
-            // `engine` override mirrors the session field's legacy semantics
-            // (TTS only). Voice-cloning requests are routed to VoxCPM2 even
-            // if the active engine is something else.
-            let perRequestEngine = input?["engine"] as? String
-            let language = (input?["language"] as? String) ?? session.language
-            let hasCloneReference = session.voiceCloneReferenceAudio != nil
-            let ttsVariant: ModelVariant
-            if hasCloneReference {
-                // Cloning forces VoxCPM2. If the session already has a
-                // VoxCPM2 variant selected (bf16, int8, etc.), keep that
-                // exact bundle — the user picked it for a reason.
-                // Otherwise fall back to the default VoxCPM2 variant.
-                if session.ttsVariant.engine == "voxcpm2" {
-                    ttsVariant = session.ttsVariant
-                } else {
-                    ttsVariant = resolveModelToTTSVariant("voxcpm2") ?? session.ttsVariant
-                }
-            } else if let perRequestEngine, !perRequestEngine.isEmpty,
-                      let v = resolveModelToTTSVariant(perRequestEngine) {
-                ttsVariant = v
-            } else {
-                ttsVariant = session.ttsVariant
-            }
-            var totalSamples = 0
-
-            switch ttsVariant.engine {
-            case "kokoro":
-                let model = try await state.loadKokoro(modelId: ttsVariant.modelId)
-                let langCode = mapToKokoroLanguageCode(language)
-                let samples = try model.synthesize(text: text, language: langCode)
-                totalSamples += try await streamSamplesAsDeltas(
-                    samples, outbound: outbound, responseId: responseId)
-            case "qwen3-tts":
-                let model = try await state.loadQwen3TTS(modelId: ttsVariant.modelId)
-                let stream = model.synthesizeStream(text: text, language: language)
-                for try await chunk in stream {
-                    if !chunk.samples.isEmpty {
-                        totalSamples += chunk.samples.count
-                        let pcm = floatToPCM16LE(chunk.samples)
-                        try await outbound.write(.text(formatJSON([
-                            "type": "response.audio.delta",
-                            "response_id": responseId,
-                            "delta": pcm.base64EncodedString()
-                        ])))
+            case "conversation.item.create":
+                // Accept text items for TTS via response.create flow
+                if let item = json["item"] as? [String: Any],
+                   let content = item["content"] as? [[String: Any]] {
+                    for part in content {
+                        if part["type"] as? String == "input_text" || part["type"] as? String == "text",
+                           let _ = part["text"] as? String {
+                            try await outbound.write(.text(formatJSON([
+                                "type": "conversation.item.created",
+                                "item": item
+                            ] as [String: Any])))
+                        }
                     }
                 }
-            case "cosyvoice":
-                let model = try await state.loadCosyVoice(modelId: ttsVariant.modelId)
-                let stream = model.synthesizeStream(text: text, language: language)
-                for try await chunk in stream {
-                    if !chunk.samples.isEmpty {
-                        totalSamples += chunk.samples.count
-                        let pcm = floatToPCM16LE(chunk.samples)
-                        try await outbound.write(.text(formatJSON([
-                            "type": "response.audio.delta",
-                            "response_id": responseId,
-                            "delta": pcm.base64EncodedString()
-                        ])))
-                    }
-                }
-            case "voxcpm2":
-                let model = try await state.loadVoxCPM2(modelId: ttsVariant.modelId)
-                let samples: [Float]
-                if hasCloneReference {
-                    samples = try await model.generateVoxCPM2(
-                        text: text,
-                        language: language,
-                        refText: session.voiceCloneReferenceText,
-                        refAudio: session.voiceCloneReferenceAudio)
-                } else {
-                    samples = try await model.generate(text: text, language: language)
-                }
-                // VoxCPM2 runs at 48 kHz internally; downsample to the 24 kHz
-                // the Realtime protocol expects.
-                let samples24k = model.outputSampleRate == 24000
-                    ? samples
-                    : resample(samples, from: model.outputSampleRate, to: 24000)
-                totalSamples += try await streamSamplesAsDeltas(
-                    samples24k, outbound: outbound, responseId: responseId)
-            case "magpie":
-                let model = try await state.loadMagpie()
-                let magpieLang = MagpieLanguage(code: mapToMagpieLanguageCode(language))
-                    ?? .english
-                let samples22k = try model.synthesize(text: text, language: magpieLang)
-                // Magpie emits 22.05 kHz; resample to the 24 kHz protocol rate.
-                let samples24k = resample(samples22k, from: MagpieTTS.sampleRate, to: 24000)
-                totalSamples += try await streamSamplesAsDeltas(
-                    samples24k, outbound: outbound, responseId: responseId)
-            case "magpie-coreml":
-                let model = try await state.loadMagpieCoreML()
-                let magpieLang = MagpieCoreMLLanguage(rawValue: mapToMagpieLanguageCode(language))
-                    ?? .english
-                let samples22k = try model.synthesize(text: text, language: magpieLang)
-                let samples24k = resample(samples22k, from: MagpieTTSCoreML.sampleRate, to: 24000)
-                totalSamples += try await streamSamplesAsDeltas(
-                    samples24k, outbound: outbound, responseId: responseId)
-            case "qwen3-tts-coreml":
-                let model = try await state.loadQwen3TTSCoreML(modelId: ttsVariant.modelId)
-                let samples = try model.synthesize(text: text, language: language)
-                totalSamples += try await streamSamplesAsDeltas(
-                    samples, outbound: outbound, responseId: responseId)
-            case "vibevoice":
-                let model = try await state.loadVibeVoice(modelId: ttsVariant.modelId)
-                let samples = try await model.generate(text: text, language: language)
-                totalSamples += try await streamSamplesAsDeltas(
-                    samples, outbound: outbound, responseId: responseId)
-            case "vibevoice-1.5b":
-                let model = try await state.loadVibeVoice15B(modelId: ttsVariant.modelId)
-                let samples = try await model.generate(text: text, language: language)
-                totalSamples += try await streamSamplesAsDeltas(
-                    samples, outbound: outbound, responseId: responseId)
+
             default:
                 try await sendRealtimeError(outbound: outbound,
-                    message: "TTS engine '\(ttsVariant.engine)' is not enabled in this build")
-                continue
+                    message: "Unknown event type: \(eventType)")
             }
-
-            if modalities.contains("text") {
-                try await outbound.write(.text(formatJSON([
-                    "type": "response.audio_transcript.done",
-                    "response_id": responseId,
-                    "transcript": text
-                ])))
-            }
-
-            try await outbound.write(.text(formatJSON([
-                "type": "response.audio.done",
-                "response_id": responseId
-            ])))
-
-            let duration = Double(totalSamples) / 24000.0
-            try await outbound.write(.text(formatJSON([
-                "type": "response.done",
-                "response": [
-                    "id": responseId,
-                    "status": "completed",
-                    "usage": [
-                        "total_tokens": 0,
-                        "output_tokens": 0
-                    ],
-                    "output": [
-                        ["type": "audio", "duration": round(duration * 100) / 100, "sample_rate": 24000]
-                    ]
-                ]
-            ] as [String: Any])))
-
-        case "conversation.item.create":
-            // Accept text items for TTS via response.create flow
-            if let item = json["item"] as? [String: Any],
-               let content = item["content"] as? [[String: Any]] {
-                for part in content {
-                    if part["type"] as? String == "input_text" || part["type"] as? String == "text",
-                       let _ = part["text"] as? String {
-                        try await outbound.write(.text(formatJSON([
-                            "type": "conversation.item.created",
-                            "item": item
-                        ] as [String: Any])))
-                    }
-                }
-            }
-
-        default:
-            try await sendRealtimeError(outbound: outbound,
-                message: "Unknown event type: \(eventType)")
+        } catch let error as CancellationError {
+            throw error
+        } catch {
+            try await sendRealtimeProcessingError(
+                outbound: outbound,
+                eventType: eventType,
+                error: error)
         }
     }
 }
 
-private func sendRealtimeError(outbound: WebSocketOutboundWriter, message: String) async throws {
+private func sendRealtimeProcessingError(
+    outbound: WebSocketOutboundWriter,
+    eventType: String,
+    error: Error
+) async throws {
+    let detail = realtimeErrorDescription(error)
+    try await sendRealtimeError(
+        outbound: outbound,
+        type: "server_error",
+        message: "Realtime event '\(eventType)' failed: \(detail)",
+        eventType: eventType)
+}
+
+private func realtimeErrorDescription(_ error: Error) -> String {
+    if let localized = error as? LocalizedError,
+       let description = localized.errorDescription,
+       !description.isEmpty {
+        return description
+    }
+    return String(describing: error)
+}
+
+private func sendRealtimeError(
+    outbound: WebSocketOutboundWriter,
+    type: String = "invalid_request_error",
+    message: String,
+    eventType: String? = nil
+) async throws {
+    var errorBody: [String: Any] = ["type": type, "message": message]
+    if let eventType {
+        errorBody["event_type"] = eventType
+    }
     try await outbound.write(.text(formatJSON([
         "type": "error",
-        "error": ["type": "invalid_request_error", "message": message]
+        "error": errorBody
     ] as [String: Any])))
 }
 
