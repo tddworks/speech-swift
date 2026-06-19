@@ -362,12 +362,18 @@ struct RealtimeModelLoadingFailure: Error, CustomStringConvertible {
 
 final class FailingRealtimeModelLoading: RealtimeModelLoading, @unchecked Sendable {
     let error: Error
+    let beforeFailure: (@Sendable () -> Void)?
 
-    init(error: Error = RealtimeModelLoadingFailure()) {
+    init(
+        error: Error = RealtimeModelLoadingFailure(),
+        beforeFailure: (@Sendable () -> Void)? = nil
+    ) {
         self.error = error
+        self.beforeFailure = beforeFailure
     }
 
     private func fail<T>() async throws -> T {
+        beforeFailure?()
         throw error
     }
 
@@ -1323,11 +1329,12 @@ private func sendRealtimeError(
 private let realtimeKeepaliveIntervalNanoseconds: UInt64 = 15_000_000_000
 private let realtimeKeepaliveEvent = "realtime.keepalive"
 
-private func withRealtimeKeepalive<T>(
+private func withRealtimeKeepalive<T: Sendable>(
     outbound: WebSocketOutboundWriter,
-    operation: () async throws -> T
+    operation: @escaping @Sendable () async throws -> T
 ) async throws -> T {
-    let keepalive = Task {
+    let operationTask = Task.detached(operation: operation)
+    let keepalive = Task.detached {
         while !Task.isCancelled {
             do {
                 try await Task.sleep(nanoseconds: realtimeKeepaliveIntervalNanoseconds)
@@ -1343,11 +1350,12 @@ private func withRealtimeKeepalive<T>(
     }
 
     do {
-        let value = try await operation()
+        let value = try await operationTask.value
         keepalive.cancel()
         await keepalive.value
         return value
     } catch {
+        operationTask.cancel()
         keepalive.cancel()
         await keepalive.value
         throw error
