@@ -165,3 +165,72 @@ final class RealtimeAPIKeepaliveTests: XCTestCase {
         }
     }
 }
+
+/// Idle gaps between operations also need a transport heartbeat. The
+/// session-scoped keepalive task in `handleRealtimeWS` is what covers
+/// them now that Hummingbird's autoPing watchdog is disabled (PR #321
+/// removed it because it raced blocking inference). This test connects,
+/// triggers no model work, and asserts that keepalive frames still
+/// arrive at the 15s cadence — proving the heartbeat runs from session
+/// accept, not just inside `runOffloaded`.
+final class RealtimeAPIIdleKeepaliveTests: XCTestCase {
+    static var serverTask: Task<Void, Error>?
+    static let port = 19389
+
+    override class func setUp() {
+        super.setUp()
+        serverTask = Task {
+            let server = AudioServer(
+                host: "127.0.0.1",
+                port: port,
+                realtimeState: FailingRealtimeModelLoading())
+            try await server.run()
+        }
+        Thread.sleep(forTimeInterval: 1.5)
+    }
+
+    override class func tearDown() {
+        serverTask?.cancel()
+        Thread.sleep(forTimeInterval: 0.5)
+        super.tearDown()
+    }
+
+    private func connect() async throws -> URLSessionWebSocketTask {
+        let url = URL(string: "ws://127.0.0.1:\(Self.port)/v1/realtime")!
+        let ws = URLSession.shared.webSocketTask(with: url)
+        ws.resume()
+        return ws
+    }
+
+    private func receiveJSON(_ ws: URLSessionWebSocketTask) async throws -> [String: Any] {
+        let msg = try await ws.receive()
+        guard case .string(let text) = msg,
+              let data = text.data(using: .utf8),
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            XCTFail("Expected JSON text message")
+            return [:]
+        }
+        return json
+    }
+
+    func testIdleSessionReceivesKeepalivesWithoutAnyOperation() async throws {
+        let ws = try await connect()
+        defer { ws.cancel(with: .normalClosure, reason: nil) }
+
+        let created = try await receiveJSON(ws)
+        XCTAssertEqual(created["type"] as? String, "session.created")
+
+        // Two keepalives at the 15s cadence land within ~32s of connect —
+        // proves the heartbeat fires even though no response.create or
+        // input_audio_buffer.* was ever sent.
+        var keepaliveCount = 0
+        while keepaliveCount < 2 {
+            let message = try await receiveJSON(ws)
+            guard message["type"] as? String == "realtime.keepalive" else {
+                XCTFail("Idle session should only emit keepalives, got: \(message)")
+                return
+            }
+            keepaliveCount += 1
+        }
+    }
+}
