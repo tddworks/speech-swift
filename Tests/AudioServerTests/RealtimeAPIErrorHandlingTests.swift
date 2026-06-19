@@ -89,3 +89,70 @@ final class RealtimeAPIErrorHandlingTests: XCTestCase {
         XCTAssertEqual(cleared["type"] as? String, "input_audio_buffer.cleared")
     }
 }
+
+final class RealtimeAPIKeepaliveTests: XCTestCase {
+    static var serverTask: Task<Void, Error>?
+    static let port = 19388
+
+    override class func setUp() {
+        super.setUp()
+        serverTask = Task {
+            let server = AudioServer(
+                host: "127.0.0.1",
+                port: port,
+                realtimeState: FailingRealtimeModelLoading(
+                    beforeFailure: { Thread.sleep(forTimeInterval: 16) }))
+            try await server.run()
+        }
+        Thread.sleep(forTimeInterval: 1.5)
+    }
+
+    override class func tearDown() {
+        serverTask?.cancel()
+        Thread.sleep(forTimeInterval: 0.5)
+        super.tearDown()
+    }
+
+    private func connect() async throws -> URLSessionWebSocketTask {
+        let url = URL(string: "ws://127.0.0.1:\(Self.port)/v1/realtime")!
+        let ws = URLSession.shared.webSocketTask(with: url)
+        ws.resume()
+        return ws
+    }
+
+    private func receiveJSON(_ ws: URLSessionWebSocketTask) async throws -> [String: Any] {
+        let msg = try await ws.receive()
+        guard case .string(let text) = msg,
+              let data = text.data(using: .utf8),
+              let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            XCTFail("Expected JSON text message")
+            return [:]
+        }
+        return json
+    }
+
+    private func sendJSON(_ ws: URLSessionWebSocketTask, _ dict: [String: Any]) async throws {
+        let data = try JSONSerialization.data(withJSONObject: dict)
+        try await ws.send(.string(String(data: data, encoding: .utf8)!))
+    }
+
+    func testBlockingModelLoadEmitsKeepaliveBeforeFailure() async throws {
+        let ws = try await connect()
+        defer { ws.cancel(with: .normalClosure, reason: nil) }
+
+        _ = try await receiveJSON(ws)
+        try await sendJSON(ws, [
+            "type": "response.create",
+            "response": ["instructions": "Hello"]
+        ] as [String: Any])
+
+        let created = try await receiveJSON(ws)
+        XCTAssertEqual(created["type"] as? String, "response.created")
+
+        let keepalive = try await receiveJSON(ws)
+        XCTAssertEqual(keepalive["type"] as? String, "realtime.keepalive")
+
+        let failure = try await receiveJSON(ws)
+        XCTAssertEqual(failure["type"] as? String, "error")
+    }
+}
