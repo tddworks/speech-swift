@@ -18,6 +18,9 @@ public struct DiarizeCommand: ParsableCommand {
     @Option(name: .long, help: "Diarization engine: pyannote (default) or sortformer")
     public var engine: String = "pyannote"
 
+    @Option(name: .long, help: "Sortformer variant: default (offline, ~125x RTF) or streaming (low-latency)")
+    public var sortformerVariant: String = "default"
+
     @Option(name: .long, help: "Speaker embedding engine: mlx (default) or coreml")
     public var embeddingEngine: String = "mlx"
 
@@ -73,8 +76,17 @@ public struct DiarizeCommand: ParsableCommand {
             print("Warning: --target-speaker is not supported with Sortformer (no speaker embeddings). Ignoring.")
         }
 
-        print("Loading Sortformer model...")
+        let sortformerConfig: SortformerConfig
+        switch sortformerVariant.lowercased() {
+        case "default":   sortformerConfig = .default
+        case "streaming": sortformerConfig = .streaming
+        default:
+            print("Error: unknown sortformer variant '\(sortformerVariant)'. Use 'default' or 'streaming'.")
+            return
+        }
+        print("Loading Sortformer model (variant: \(sortformerVariant.lowercased()), chunk=\(sortformerConfig.coreMLInputFrames) mel frames)...")
         let diarizer = try await SortformerDiarizer.fromPretrained(
+            config: sortformerConfig,
             progressHandler: reportProgress
         )
 
